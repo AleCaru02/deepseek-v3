@@ -1,0 +1,1 @@
+EuroMarket patch prepared: repaired Auth schema fields for bootstrap admin and added show/hide password controls to login, registration and profile password fields. Deployment bundle pending branch update.
