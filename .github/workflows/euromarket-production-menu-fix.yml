@@ -1,0 +1,109 @@
+name: EuroMarket production menu fix
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - euromarket-production-menu-fix-trigger.txt
+
+permissions:
+  contents: write
+
+jobs:
+  fix-production-bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout production branch
+        uses: actions/checkout@v4
+        with:
+          ref: euromarket-deploy
+          fetch-depth: 0
+
+      - name: Rebuild all bundle parts atomically
+        shell: python
+        run: |
+          from pathlib import Path
+          import base64
+          import gzip
+          import math
+
+          root = Path('euromarket')
+          snapshot = root / 'vercel-parts'
+          manifest = (snapshot / 'manifest.txt').read_text(encoding='utf-8')
+          count_line = next(line for line in manifest.splitlines() if line.startswith('count='))
+          count = int(count_line.split('=', 1)[1])
+          packed = ''.join((snapshot / f'p{i:02d}.txt').read_text(encoding='utf-8') for i in range(count))
+          packed = ''.join(packed.split())
+          html = gzip.decompress(base64.b64decode(packed)).decode('utf-8')
+
+          bad_start = html.find('<style id="em-mobile-polish-v8">')
+          if bad_start >= 0:
+              bad_script_start = html.find('<script type="module">', bad_start)
+              bad_script_end = html.find('</script>', bad_script_start)
+              if bad_script_start < 0 or bad_script_end < 0:
+                  raise RuntimeError('The conflicting mobile block is incomplete')
+              html = html[:bad_start] + html[bad_script_end + len('</script>'):]
+
+          marker = '<style id="em-production-menu-final">'
+          old_start = html.find(marker)
+          if old_start >= 0:
+              old_script_start = html.find('<script id="em-production-menu-final-script">', old_start)
+              old_script_end = html.find('</script>', old_script_start)
+              if old_script_start >= 0 and old_script_end >= 0:
+                  html = html[:old_start] + html[old_script_end + len('</script>'):]
+
+          final_patch = r'''
+<style id="em-production-menu-final">
+#em-menu-drawer .em-drawer-nav button{background:transparent!important;color:rgba(255,255,255,.78)!important;box-shadow:none!important;-webkit-tap-highlight-color:transparent!important}
+#em-menu-drawer .em-drawer-nav button.active{background:#13a967!important;color:#fff!important;box-shadow:none!important}
+#em-menu-drawer .em-drawer-nav button:not(.active):focus,#em-menu-drawer .em-drawer-nav button:not(.active):active,#em-menu-drawer .em-drawer-nav button:not(.active):hover{background:transparent!important;color:rgba(255,255,255,.78)!important;box-shadow:none!important;outline:none!important}
+#em-menu-drawer .em-drawer-close{margin-left:auto!important;width:44px!important;height:44px!important;border:0!important;border-radius:13px!important;display:grid!important;place-items:center!important;background:rgba(255,255,255,.12)!important;color:#fff!important;font-size:28px!important;line-height:1!important;-webkit-tap-highlight-color:transparent!important}
+#em-menu-overlay{background:rgba(3,29,20,.48)!important}
+body.em-menu-open{overflow:hidden!important}
+</style>
+<script id="em-production-menu-final-script">
+(()=>{
+ const drawer=()=>document.getElementById('em-menu-drawer');
+ const overlay=()=>document.getElementById('em-menu-overlay');
+ const close=()=>{drawer()?.classList.remove('open');overlay()?.classList.remove('open');document.body.classList.remove('em-menu-open');document.body.style.overflow=''};
+ const open=()=>{drawer()?.classList.add('open');overlay()?.classList.add('open');document.body.classList.add('em-menu-open');document.body.style.overflow='hidden'};
+ document.addEventListener('click',event=>{
+  const target=event.target instanceof Element?event.target:null;
+  if(!target)return;
+  if(target.closest('#em-menu-drawer .em-drawer-close')){event.preventDefault();close();return}
+  if(target.closest('#em-menu-drawer [data-em-nav]')){setTimeout(close,0);return}
+  if(target.id==='em-menu-overlay'){event.preventDefault();close();return}
+  if(target.closest('#em-menu')){event.preventDefault();drawer()?.classList.contains('open')?close():open()}
+ },true);
+ document.addEventListener('keydown',event=>{if(event.key==='Escape')close()});
+ const prepare=()=>{const x=document.querySelector('#em-menu-drawer .em-drawer-close');if(x){x.type='button';x.setAttribute('aria-label','Chiudi navigazione')}};
+ new MutationObserver(prepare).observe(document.documentElement,{childList:true,subtree:true});
+ prepare();
+})();
+</script>
+'''
+
+          html += final_patch
+          rebuilt = base64.b64encode(gzip.compress(html.encode('utf-8'), compresslevel=9, mtime=0)).decode('ascii')
+          size = math.ceil(len(rebuilt) / 5)
+          for i in range(5):
+              (root / f'r{i}.txt').write_text(rebuilt[i*size:(i+1)*size], encoding='utf-8')
+
+          for old in snapshot.glob('p*.txt'):
+              old.unlink()
+          snapshot_count = 12
+          snapshot_size = math.ceil(len(rebuilt) / snapshot_count)
+          for i in range(snapshot_count):
+              (snapshot / f'p{i:02d}.txt').write_text(rebuilt[i*snapshot_size:(i+1)*snapshot_size], encoding='utf-8')
+          (snapshot / 'manifest.txt').write_text(f'count={snapshot_count}\nsize={snapshot_size}\ntotal={len(rebuilt)}\n', encoding='utf-8')
+          (root / '.menu-main-fix-applied').write_text('conflicting mobile patch removed; one drawer controller active\n', encoding='utf-8')
+
+      - name: Commit production repair
+        shell: bash
+        run: |
+          git config user.name "EuroMarket Deploy Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add euromarket/r0.txt euromarket/r1.txt euromarket/r2.txt euromarket/r3.txt euromarket/r4.txt euromarket/vercel-parts euromarket/.menu-main-fix-applied
+          git commit -m "Repair EuroMarket production mobile menu"
+          git push origin HEAD:euromarket-deploy
