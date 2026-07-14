@@ -1,1 +1,1 @@
-apply-chat-menu-audit-v1
+rebuild-chat-menu-audit-v2
