@@ -1,0 +1,40 @@
+    const drawer=document.createElement('aside');drawer.id='em-menu-drawer';drawer.setAttribute('aria-label','Menu principale');
+    const available=new Set([...document.querySelectorAll('[data-nav]')].map(x=>x.dataset.nav));
+    drawer.innerHTML=`<div class="em-drawer-head"><div class="em-drawer-brand"><span class="em-drawer-logo">E</span>EuroMarket</div><button class="em-drawer-close" aria-label="Chiudi menu">×</button></div><div class="em-drawer-nav">${navItems.filter(x=>available.has(x[0])).map(x=>`<button data-em-nav="${x[0]}"><span class="em-drawer-icon">${x[1]}</span>${x[2]}</button>`).join('')}</div>`;
+    document.body.append(overlay,drawer);
+    btn.onclick=()=>{drawer.classList.add('open');overlay.classList.add('open');document.body.style.overflow='hidden'};overlay.onclick=closeMenu;drawer.querySelector('.em-drawer-close').onclick=closeMenu;
+    drawer.querySelectorAll('[data-em-nav]').forEach(b=>b.onclick=()=>{document.querySelector(`[data-nav="${b.dataset.emNav}"]`)?.click();closeMenu()});
+  }
+  function refreshMenu(){
+    installMenu();const page=(location.hash||'#dashboard').slice(1);document.querySelectorAll('[data-em-nav]').forEach(b=>b.classList.toggle('active',b.dataset.emNav===page));
+  }
+  document.addEventListener('click',e=>{const b=e.target.closest?.('[data-chat]');if(b?.dataset.chat){lastTarget=b.dataset.chat;sessionStorage.setItem('em-chat-target',lastTarget)}},true);
+  document.addEventListener('keydown',e=>{if(e.key==='Escape')closeMenu()});
+  document.addEventListener('submit',async e=>{
+    const form=e.target;if(form?.id!=='chat-form')return;
+    e.preventDefault();e.stopImmediatePropagation();
+    const old=form.elements.namedItem('message');if(!old)return;
+    const msg=String(old.value||'').trim();if(!msg)return;
+    let target=lastTarget||document.querySelector('[data-chat^="group:"]')?.dataset.chat||'';
+    const [type,id]=target.split(':');if(!id)return toast('Seleziona una conversazione.',true);
+    const button=form.querySelector('button[type="submit"],button:not([type])');if(button){button.disabled=true;button.textContent='Invio…'}
+    let status=form.nextElementSibling;if(!status?.classList.contains('em-chat-status')){status=document.createElement('div');status.className='em-chat-status';form.after(status)}status.textContent='Invio del messaggio…';status.classList.remove('error');
+    try{
+      const c=await getClient();const {data:{session}}=await c.auth.getSession();if(!session)throw Error('Sessione scaduta');
+      const payload={conversation_type:type,sender_id:session.user.id,content:msg,group_id:type==='group'?id:null,conversation_id:type==='direct'?id:null};
+      const {error}=await c.from('messages').insert(payload);if(error)throw error;
+      old.value='';status.textContent='Messaggio inviato';
+      document.querySelector(`[data-chat="${CSS.escape(target)}"]`)?.click();setTimeout(()=>status.textContent='',1200);
+    }catch(err){status.textContent=err?.message||'Invio non riuscito';status.classList.add('error');toast(status.textContent,true)}finally{if(button){button.disabled=false;button.textContent='Invia'}}
+  },true);
+  function improveComposer(){
+    const form=document.querySelector('#chat-form');if(!form||form.dataset.emFixed)return;form.dataset.emFixed='1';
+    const input=form.elements.namedItem('message');if(input&&input.tagName==='INPUT'){const t=document.createElement('textarea');t.name='message';t.className=input.className;t.placeholder=input.placeholder;t.maxLength=2000;t.rows=1;t.autocomplete='off';input.replaceWith(t);t.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();form.requestSubmit()}})}
+    const btn=form.querySelector('button');if(btn)btn.type='submit';const s=document.createElement('div');s.className='em-chat-status';form.after(s);
+  }
+  const observer=new MutationObserver(()=>{refreshMenu();improveComposer()});observer.observe(document.documentElement,{childList:true,subtree:true});
+  for(let i=0;i<30;i++){refreshMenu();improveComposer();await sleep(200)}
+  window.addEventListener('hashchange',()=>setTimeout(refreshMenu,0));
+  window.addEventListener('unhandledrejection',e=>{if(e.reason?.message)toast(e.reason.message,true)});
+})();
+</script>
