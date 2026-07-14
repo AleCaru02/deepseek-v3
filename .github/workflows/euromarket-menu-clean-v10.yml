@@ -1,0 +1,160 @@
+name: Clean EuroMarket mobile menu v10
+
+on:
+  push:
+    branches:
+      - euromarket-deploy
+    paths:
+      - euromarket/menu-clean-v10-trigger.txt
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: euromarket-deploy
+          fetch-depth: 0
+
+      - name: Remove duplicate mobile patch and install one menu controller
+        shell: python
+        run: |
+          from pathlib import Path
+          import base64, gzip, math
+
+          root = Path('euromarket')
+          packed = ''.join((root / f'r{i}.txt').read_text(encoding='utf-8') for i in range(5))
+          packed = ''.join(packed.split())
+          html = gzip.decompress(base64.b64decode(packed)).decode('utf-8')
+
+          bad_start = html.find('<style id="em-mobile-polish-v8">')
+          if bad_start >= 0:
+              bad_script_start = html.find('<script type="module">', bad_start)
+              bad_script_end = html.find('</script>', bad_script_start)
+              if bad_script_start < 0 or bad_script_end < 0:
+                  raise RuntimeError('Duplicate mobile patch markers are incomplete')
+              html = html[:bad_start] + html[bad_script_end + len('</script>'):]
+
+          old_start = html.find('<style id="em-menu-final-v10">')
+          if old_start >= 0:
+              old_script_start = html.find('<script id="em-menu-final-v10-script">', old_start)
+              old_script_end = html.find('</script>', old_script_start)
+              if old_script_start >= 0 and old_script_end >= 0:
+                  html = html[:old_start] + html[old_script_end + len('</script>'):]
+
+          final_patch = r'''
+<style id="em-menu-final-v10">
+#em-menu-drawer .em-drawer-nav button {
+  background: transparent !important;
+  color: rgba(255,255,255,.78) !important;
+  box-shadow: none !important;
+  -webkit-tap-highlight-color: transparent !important;
+}
+#em-menu-drawer .em-drawer-nav button.active {
+  background: #13a967 !important;
+  color: #fff !important;
+  box-shadow: none !important;
+}
+#em-menu-drawer .em-drawer-nav button:not(.active):focus,
+#em-menu-drawer .em-drawer-nav button:not(.active):active,
+#em-menu-drawer .em-drawer-nav button:not(.active):hover {
+  background: transparent !important;
+  color: rgba(255,255,255,.78) !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+#em-menu-drawer .em-drawer-close {
+  margin-left: auto !important;
+  width: 44px !important;
+  height: 44px !important;
+  border: 0 !important;
+  border-radius: 13px !important;
+  display: grid !important;
+  place-items: center !important;
+  background: rgba(255,255,255,.12) !important;
+  color: #fff !important;
+  font-size: 27px !important;
+  line-height: 1 !important;
+  -webkit-tap-highlight-color: transparent !important;
+}
+#em-menu-overlay { background: rgba(3,29,20,.48) !important; }
+body.em-menu-open { overflow: hidden !important; }
+</style>
+<script id="em-menu-final-v10-script">
+(() => {
+  const drawer = () => document.getElementById('em-menu-drawer');
+  const overlay = () => document.getElementById('em-menu-overlay');
+  const closeMenu = () => {
+    drawer()?.classList.remove('open');
+    overlay()?.classList.remove('open');
+    document.body.classList.remove('em-menu-open');
+    document.body.style.overflow = '';
+  };
+  const openMenu = () => {
+    drawer()?.classList.add('open');
+    overlay()?.classList.add('open');
+    document.body.classList.add('em-menu-open');
+    document.body.style.overflow = 'hidden';
+  };
+
+  document.addEventListener('click', event => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+
+    if (target.closest('#em-menu')) {
+      event.preventDefault();
+      drawer()?.classList.contains('open') ? closeMenu() : openMenu();
+      return;
+    }
+
+    if (target.closest('#em-menu-drawer .em-drawer-close')) {
+      event.preventDefault();
+      closeMenu();
+      return;
+    }
+
+    if (target.closest('#em-menu-drawer [data-em-nav]')) {
+      setTimeout(closeMenu, 0);
+      return;
+    }
+
+    if (target.id === 'em-menu-overlay') closeMenu();
+  }, true);
+
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape') closeMenu();
+  });
+
+  new MutationObserver(() => {
+    const x = document.querySelector('#em-menu-drawer .em-drawer-close');
+    if (x) {
+      x.setAttribute('aria-label', 'Chiudi navigazione');
+      x.type = 'button';
+    }
+    document.querySelectorAll('#em-menu-drawer [data-em-nav]').forEach(button => {
+      button.style.removeProperty('background');
+    });
+  }).observe(document.documentElement, { childList: true, subtree: true });
+})();
+</script>
+'''
+
+          html += final_patch
+          encoded = base64.b64encode(gzip.compress(html.encode('utf-8'), compresslevel=9, mtime=0)).decode('ascii')
+          part_size = math.ceil(len(encoded) / 5)
+          for i in range(5):
+              (root / f'r{i}.txt').write_text(encoded[i*part_size:(i+1)*part_size], encoding='utf-8')
+
+          (root / '.menu-clean-v10-applied').write_text('duplicate mobile menu removed; close control fixed\n', encoding='utf-8')
+
+      - name: Commit menu cleanup
+        shell: bash
+        run: |
+          git config user.name "EuroMarket Deploy Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add euromarket/r0.txt euromarket/r1.txt euromarket/r2.txt euromarket/r3.txt euromarket/r4.txt euromarket/.menu-clean-v10-applied
+          git commit -m "Remove duplicate mobile menu handlers and fix drawer"
+          git push origin HEAD:euromarket-deploy
