@@ -1,4 +1,4 @@
-name: Export EuroMarket local Vercel parts
+name: Rebuild EuroMarket production bundle
 
 on:
   push:
@@ -11,34 +11,82 @@ permissions:
   contents: write
 
 jobs:
-  export:
+  rebuild:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: euromarket-deploy
           fetch-depth: 0
-      - name: Export fixed local parts
+
+      - name: Remove conflicting menu patch
         shell: python
         run: |
           from pathlib import Path
-          root=Path('euromarket')
-          packed=''.join((root/f'r{i}.txt').read_text() for i in range(5))
-          packed=''.join(packed.split())
-          out=root/'vercel-parts'
-          out.mkdir(exist_ok=True)
-          count=12
-          size=(len(packed)+count-1)//count
-          for old in out.glob('p*.txt'):
-              old.unlink()
-          for i in range(count):
-              (out/f'p{i:02d}.txt').write_text(packed[i*size:(i+1)*size],encoding='utf-8')
-          (out/'manifest.txt').write_text(f'count={count}\nsize={size}\ntotal={len(packed)}\n',encoding='utf-8')
-      - name: Commit exported parts
+          import base64
+          import gzip
+          import math
+
+          root = Path('euromarket')
+          data = ''.join((root / ('r%d.txt' % i)).read_text(encoding='utf-8') for i in range(5))
+          data = ''.join(data.split())
+          html = gzip.decompress(base64.b64decode(data)).decode('utf-8')
+
+          start = html.find('<style id="em-mobile-polish-v8">')
+          if start != -1:
+              script_start = html.find('<script type="module">', start)
+              script_end = html.find('</script>', script_start)
+              if script_start == -1 or script_end == -1:
+                  raise RuntimeError('Conflicting menu patch could not be removed safely')
+              html = html[:start] + html[script_end + 9:]
+
+          previous = html.find('<style id="em-menu-clean-final">')
+          if previous != -1:
+              previous_script = html.find('<script id="em-menu-clean-final-script">', previous)
+              previous_end = html.find('</script>', previous_script)
+              if previous_script != -1 and previous_end != -1:
+                  html = html[:previous] + html[previous_end + 9:]
+
+          patch = r'''<style id="em-menu-clean-final">
+#em-menu-drawer .em-drawer-nav button{background:transparent!important;color:rgba(255,255,255,.78)!important;box-shadow:none!important;-webkit-tap-highlight-color:transparent!important}
+#em-menu-drawer .em-drawer-nav button.active{background:#13a967!important;color:#fff!important;box-shadow:none!important}
+#em-menu-drawer .em-drawer-nav button:not(.active):focus,#em-menu-drawer .em-drawer-nav button:not(.active):active,#em-menu-drawer .em-drawer-nav button:not(.active):hover{background:transparent!important;color:rgba(255,255,255,.78)!important;box-shadow:none!important;outline:none!important}
+#em-menu-drawer .em-drawer-close{margin-left:auto!important;width:44px!important;height:44px!important;border:0!important;border-radius:13px!important;display:grid!important;place-items:center!important;background:rgba(255,255,255,.12)!important;color:#fff!important;font-size:28px!important;line-height:1!important;-webkit-tap-highlight-color:transparent!important}
+#em-menu-overlay{background:rgba(3,29,20,.48)!important}
+body.em-menu-open{overflow:hidden!important}
+</style>
+<script id="em-menu-clean-final-script">
+(()=>{
+ const drawer=()=>document.getElementById('em-menu-drawer');
+ const overlay=()=>document.getElementById('em-menu-overlay');
+ const close=()=>{drawer()?.classList.remove('open');overlay()?.classList.remove('open');document.body.classList.remove('em-menu-open');document.body.style.overflow=''};
+ const open=()=>{drawer()?.classList.add('open');overlay()?.classList.add('open');document.body.classList.add('em-menu-open');document.body.style.overflow='hidden'};
+ document.addEventListener('click',e=>{
+  const t=e.target instanceof Element?e.target:null;if(!t)return;
+  if(t.closest('#em-menu-drawer .em-drawer-close')){e.preventDefault();close();return}
+  if(t.closest('#em-menu-drawer [data-em-nav]')){setTimeout(close,0);return}
+  if(t.id==='em-menu-overlay'){e.preventDefault();close();return}
+  if(t.closest('#em-menu')){e.preventDefault();drawer()?.classList.contains('open')?close():open()}
+ },true);
+ document.addEventListener('keydown',e=>{if(e.key==='Escape')close()});
+ const prepare=()=>{const x=document.querySelector('#em-menu-drawer .em-drawer-close');if(x){x.type='button';x.setAttribute('aria-label','Chiudi navigazione')}};
+ new MutationObserver(prepare).observe(document.documentElement,{childList:true,subtree:true});prepare();
+})();
+</script>'''
+
+          html += patch
+          packed = base64.b64encode(gzip.compress(html.encode('utf-8'), compresslevel=9, mtime=0)).decode('ascii')
+          size = math.ceil(len(packed) / 5)
+          for i in range(5):
+              (root / ('r%d.txt' % i)).write_text(packed[i*size:(i+1)*size], encoding='utf-8')
+
+          (root / '.menu-clean-final-applied').write_text('single mobile drawer controller active\n', encoding='utf-8')
+
+      - name: Commit rebuilt bundle
         shell: bash
         run: |
           git config user.name "EuroMarket Deploy Bot"
           git config user.email "actions@users.noreply.github.com"
-          git add euromarket/vercel-parts
-          git commit -m "Export EuroMarket bundle for local Vercel deployment"
+          git add euromarket/r0.txt euromarket/r1.txt euromarket/r2.txt euromarket/r3.txt euromarket/r4.txt euromarket/.menu-clean-final-applied
+          git commit -m "Fix EuroMarket mobile menu conflicts"
           git push origin HEAD:euromarket-deploy
