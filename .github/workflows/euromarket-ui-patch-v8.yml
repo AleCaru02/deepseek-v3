@@ -1,0 +1,38 @@
+name: Apply EuroMarket UI patch v8
+
+on:
+  push:
+    branches:
+      - euromarket-deploy
+    paths:
+      - euromarket/patch-v8.txt
+
+permissions:
+  contents: write
+
+jobs:
+  apply-patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout deployment branch
+        uses: actions/checkout@v4
+        with:
+          ref: euromarket-deploy
+          fetch-depth: 0
+
+      - name: Append mobile polish patch once
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f euromarket/.patch-v8-applied ]; then
+            echo "Patch already applied"
+            exit 0
+          fi
+          test -s euromarket/patch-v8.txt
+          cat euromarket/patch-v8.txt >> euromarket/r4.txt
+          printf '%s\n' "Applied $(date -u +%FT%TZ)" > euromarket/.patch-v8-applied
+          git config user.name "EuroMarket Deploy Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add euromarket/r4.txt euromarket/.patch-v8-applied
+          git commit -m "Fix mobile drawer and shared leave calendar"
+          git push origin HEAD:euromarket-deploy
