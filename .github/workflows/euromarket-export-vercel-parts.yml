@@ -1,0 +1,44 @@
+name: Export EuroMarket local Vercel parts
+
+on:
+  push:
+    branches:
+      - euromarket-deploy
+    paths:
+      - euromarket/export-vercel-parts.txt
+
+permissions:
+  contents: write
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: euromarket-deploy
+          fetch-depth: 0
+      - name: Export fixed local parts
+        shell: python
+        run: |
+          from pathlib import Path
+          root=Path('euromarket')
+          packed=''.join((root/f'r{i}.txt').read_text() for i in range(5))
+          packed=''.join(packed.split())
+          out=root/'vercel-parts'
+          out.mkdir(exist_ok=True)
+          count=12
+          size=(len(packed)+count-1)//count
+          for old in out.glob('p*.txt'):
+              old.unlink()
+          for i in range(count):
+              (out/f'p{i:02d}.txt').write_text(packed[i*size:(i+1)*size],encoding='utf-8')
+          (out/'manifest.txt').write_text(f'count={count}\nsize={size}\ntotal={len(packed)}\n',encoding='utf-8')
+      - name: Commit exported parts
+        shell: bash
+        run: |
+          git config user.name "EuroMarket Deploy Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add euromarket/vercel-parts
+          git commit -m "Export EuroMarket bundle for local Vercel deployment"
+          git push origin HEAD:euromarket-deploy
