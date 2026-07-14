@@ -17,7 +17,7 @@ jobs:
         with:
           ref: euromarket-deploy
           fetch-depth: 0
-      - name: Append verified runtime patch
+      - name: Rebuild a single verified application package
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -26,21 +26,30 @@ jobs:
           root = Path('euromarket')
           patch = (root/'runtime-patch/part1.txt').read_text() + (root/'runtime-patch/part2.txt').read_text()
           digest = hashlib.sha256(patch.encode()).hexdigest()
-          marker = root/'runtime-patch/applied.txt'
-          if marker.exists() and marker.read_text().strip() == digest:
-              print('Patch already applied')
-              raise SystemExit(0)
-          encoded = base64.b64encode(gzip.compress(patch.encode(), compresslevel=9, mtime=0)).decode()
-          target = root/'r4.txt'
-          target.write_text(target.read_text().strip() + encoded)
-          marker.write_text(digest + '\n')
-          print('Appended patch', digest, 'encoded bytes', len(encoded))
+
+          packed = ''.join((root/f'r{i}.txt').read_text().strip() for i in range(5))
+          raw = base64.b64decode(packed)
+          html = gzip.decompress(raw).decode('utf-8')
+
+          if 'id="em-audit-style"' not in html:
+              html += patch
+
+          rebuilt = base64.b64encode(gzip.compress(html.encode('utf-8'), compresslevel=9, mtime=0)).decode()
+          size = (len(rebuilt) + 4) // 5
+          for i in range(5):
+              (root/f'r{i}.txt').write_text(rebuilt[i*size:(i+1)*size])
+
+          (root/'runtime-patch/applied.txt').write_text(digest + '\n')
+          (root/'runtime-patch/package-info.txt').write_text(
+              f'patch_sha256={digest}\nhtml_bytes={len(html.encode())}\nbase64_chars={len(rebuilt)}\n'
+          )
+          print('Rebuilt single package', digest, len(html), len(rebuilt))
           PY
-      - name: Commit patch
+      - name: Commit rebuilt package
         run: |
           if git diff --quiet; then exit 0; fi
           git config user.name 'EuroMarket Deploy Bot'
           git config user.email 'actions@users.noreply.github.com'
-          git add euromarket/r4.txt euromarket/runtime-patch/applied.txt
-          git commit -m 'Apply EuroMarket chat and mobile menu patch [skip ci]'
+          git add euromarket/r0.txt euromarket/r1.txt euromarket/r2.txt euromarket/r3.txt euromarket/r4.txt euromarket/runtime-patch/applied.txt euromarket/runtime-patch/package-info.txt
+          git commit -m 'Rebuild EuroMarket chat and mobile menu package [skip ci]'
           git push origin HEAD:euromarket-deploy
