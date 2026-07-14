@@ -1,0 +1,35 @@
+<style id="em-audit-style">
+@media(max-width:900px){
+  .bottom-nav{display:none!important}
+  .main{padding-bottom:calc(30px + env(safe-area-inset-bottom))!important}
+  .topbar{padding-left:10px!important}
+}
+#em-menu{display:none;width:42px;height:42px;border:0;border-radius:13px;background:#e8f7ef;color:#064e3b;font-size:22px;font-weight:900;align-items:center;justify-content:center;flex:0 0 auto}
+#em-menu-overlay{display:none;position:fixed;inset:0;background:rgba(3,29,20,.55);backdrop-filter:blur(3px);z-index:998}
+#em-menu-drawer{position:fixed;left:0;top:0;bottom:0;width:min(330px,86vw);padding:18px 14px 24px;background:linear-gradient(180deg,#063f32,#052f29);color:#fff;z-index:999;transform:translateX(-105%);transition:transform .22s ease;box-shadow:22px 0 60px rgba(0,0,0,.33);overflow:auto}
+#em-menu-drawer.open{transform:translateX(0)}#em-menu-overlay.open{display:block}
+.em-drawer-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;padding:4px}.em-drawer-brand{display:flex;align-items:center;gap:10px;font-size:18px;font-weight:900}.em-drawer-logo{width:38px;height:38px;border-radius:13px;background:#10a66a;display:grid;place-content:center}.em-drawer-close{width:40px;height:40px;border:0;border-radius:12px;background:rgba(255,255,255,.1);color:white;font-size:20px}.em-drawer-nav{display:grid;gap:6px}.em-drawer-nav button{border:0;text-align:left;padding:13px;border-radius:13px;background:transparent;color:rgba(255,255,255,.78);font-weight:760;display:flex;align-items:center;gap:12px}.em-drawer-nav button.active{background:linear-gradient(135deg,#1cb570,#0a8254);color:white}.em-drawer-icon{width:30px;height:30px;border-radius:9px;background:rgba(255,255,255,.1);display:grid;place-content:center}
+.em-chat-status{min-height:20px;padding:5px 4px 0;font-size:11px;color:#6c7a73}.em-chat-status.error{color:#c93b34}.composer textarea{flex:1;border:0!important;background:transparent!important;box-shadow:none!important;min-height:44px;max-height:130px;resize:none;padding:11px 12px}.composer button[disabled]{opacity:.55}
+@media(max-width:900px){#em-menu{display:flex}}
+</style>
+<script type="module">
+(async()=>{
+  const sleep=m=>new Promise(r=>setTimeout(r,m));
+  const toast=(m,bad=false)=>{const x=document.createElement('div');x.textContent=m;Object.assign(x.style,{position:'fixed',top:'76px',right:'14px',zIndex:2000,maxWidth:'360px',padding:'12px 15px',borderRadius:'13px',font:'650 13px system-ui',color:bad?'#c93b34':'#064e3b',background:bad?'#fff0ef':'#e8f7ef',border:'1px solid '+(bad?'#ffd9d6':'#ccebd9'),boxShadow:'0 12px 40px rgba(0,0,0,.14)'});document.body.appendChild(x);setTimeout(()=>x.remove(),3800)};
+  let client=null,lastTarget=sessionStorage.getItem('em-chat-target')||'';
+  async function getClient(){
+    if(client)return client;
+    let src='';for(const s of document.scripts)src+='\n'+(s.textContent||'');
+    const u=src.match(/SUPABASE_URL\s*=\s*['"]([^'"]+)/)?.[1];
+    const k=src.match(/SUPABASE_KEY\s*=\s*['"]([^'"]+)/)?.[1];
+    if(!u||!k)throw Error('Configurazione chat non disponibile');
+    const {createClient}=await import('https://esm.sh/@supabase/supabase-js@2.49.8');
+    client=createClient(u,k);return client;
+  }
+  const navItems=[['dashboard','⌂','Dashboard'],['scadenze','◷','Scadenze'],['scansiona','▣','Scansiona'],['turni','▦','Turni'],['ferie','☀','Ferie'],['ordini','☷','Ordini'],['chat','✉','Chat'],['profilo','●','Profilo'],['admin','◆','Amministrazione']];
+  function closeMenu(){document.querySelector('#em-menu-drawer')?.classList.remove('open');document.querySelector('#em-menu-overlay')?.classList.remove('open');document.body.style.overflow=''}
+  function installMenu(){
+    document.querySelectorAll('.bottom-nav').forEach(n=>n.remove());
+    const top=document.querySelector('.topbar');if(!top||document.querySelector('#em-menu'))return;
+    const btn=document.createElement('button');btn.id='em-menu';btn.type='button';btn.setAttribute('aria-label','Apri menu');btn.textContent='☰';top.prepend(btn);
+    const overlay=document.createElement('div');overlay.id='em-menu-overlay';
